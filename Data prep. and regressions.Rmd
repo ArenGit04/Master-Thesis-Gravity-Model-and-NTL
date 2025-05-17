@@ -1,0 +1,609 @@
+---
+title: "Thesis"
+author: "Abgaryan Aren, Ostroumov Andrey"
+date: "2025-02-27"
+output: html_document
+---
+
+```{r}
+#download.file("https://drive.google.com/uc?export=download&id=1r0QA8TbgKX8aQdoKHscqGg7nMzw7ac4B", 'FGP_panel')
+#install.packages("msm_1.8.2.tar.gz", repos = NULL, type = "source")
+#install.packages("tradepolicy_0.7.0.tar.gz", repos = NULL, type = "source")
+```
+
+## Loading Data
+
+```{r}
+library(readr)
+library(dplyr)
+library(stringr)
+
+FGP_panel <- read_csv("FGP_panel.csv", col_types = cols(FAF_Zone_1_orig = col_factor(), FAF_Zone_1_dest = col_factor(),
+                                                        dms_orig = col_factor(), dms_dest = col_factor(),
+                                                        dms_mode = col_factor(), trade_type = col_factor(),
+                                                        sctg2 = col_factor(), dist_band = col_factor(),
+                                                        year = col_factor(), State_Name_orig = col_factor(),
+                                                        State_Name_dest = col_factor(), within_state = col_factor(),
+                                                        com_border= col_factor()))
+
+FGP_panel_new <- read_csv("FGP_no_rem.csv", col_types = cols(FAF_Zone_1_orig = col_factor(), FAF_Zone_1_dest = col_factor(),
+                                                        dms_orig = col_factor(), dms_dest = col_factor(),
+                                                        dms_mode = col_factor(), trade_type = col_factor(),
+                                                        sctg2 = col_factor(), dist_band = col_factor(),
+                                                        year = col_factor(), State_Name_orig = col_factor(),
+                                                        State_Name_dest = col_factor(), within_state = col_factor(),
+                                                        com_border= col_factor()))
+FGP_panel_new <- FGP_panel_new %>%
+  mutate(
+    dms_orig = as.factor(str_remove(as.character(dms_orig), "^0+")),
+    dms_dest = as.factor(str_remove(as.character(dms_dest), "^0+"))
+  )
+
+# FGP_panel_new1 <- read_csv("FGP_no_rem1.csv", col_types = cols(FAF_Zone_1_orig = col_factor(), FAF_Zone_1_dest = col_factor(),
+#                                                         dms_orig = col_factor(), dms_dest = col_factor(),
+#                                                         dms_mode = col_factor(), trade_type = col_factor(),
+#                                                         sctg2 = col_factor(), dist_band = col_factor(),
+#                                                         year = col_factor(), State_Name_orig = col_factor(),
+#                                                         State_Name_dest = col_factor()))
+# 
+# FGP_panel_new <- cbind(FGP_panel_new, FGP_panel_new1[, c("SoL_per_capita_orig", "SoL_per_capita_dest", "SoL_orig", "SoL_dest", "SoL_per_pixel_orig", "SoL_per_pixel_dest")])
+
+FGP_panel <- FGP_panel %>%
+  mutate(Num_pixel_orig = SoL_orig/SoL_per_pixel_orig, Num_pixel_dest = SoL_dest/SoL_per_pixel_dest)
+
+FGP_panel_new <- FGP_panel_new %>%
+  mutate(Num_pixel_orig = SoL_orig/SoL_per_pixel_orig, Num_pixel_dest = SoL_dest/SoL_per_pixel_dest)
+
+new_values <- c("2018" = 940249, 
+                "2019" = 86524, 
+                "2020" = 756057, 
+                "2021" = 1092499)
+
+# Replace SoL_orig for Alaska
+FGP_panel <- FGP_panel %>%
+  mutate(SoL_orig = ifelse((dms_orig == "20") & (year %in% names(new_values)), 
+                          new_values[as.character(year)], 
+                          SoL_orig))
+
+# Replace SoL_dest for Alaska
+FGP_panel <- FGP_panel %>%
+  mutate(SoL_dest = ifelse((dms_dest == "20") & (year %in% names(new_values)), 
+                          new_values[as.character(year)], 
+                          SoL_dest))
+
+FGP_panel$within_state <- factor(FGP_panel$within_state, levels = c(0, 1))
+FGP_panel_new$within_state <- factor(FGP_panel_new$within_state, levels = c(0, 1))
+FGP_panel$contig_faf <- factor(FGP_panel$com_border, levels = c(0, 1))
+FGP_panel_new$contig_faf <- factor(FGP_panel_new$com_border, levels = c(0, 1))
+```
+
+```{r}
+length(unique(FGP_panel$State_Name_dest))
+library(readr)
+neighbors_states <- read_csv("neighbors-states.csv")
+
+state_mapping <- data.frame(
+  state_code = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", 
+                 "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", 
+                 "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", 
+                 "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", 
+                 "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"),
+  state_name = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", 
+                 "Colorado", "Connecticut", "Delaware", "District of Columbia", 
+                 "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", 
+                 "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", 
+                 "Massachusetts", "Michigan", "Minnesota", "Mississippi", "Missouri", 
+                 "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey", 
+                 "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", 
+                 "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", 
+                 "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", 
+                 "Washington", "West Virginia", "Wisconsin", "Wyoming")
+)
+
+#FGP_panel <- FGP_panel %>%  select(-state_code_orig, -state_code_dest)
+
+FGP_panel <- FGP_panel %>%
+  left_join(state_mapping, by = c("State_Name_orig" = "state_name")) %>%
+  rename(state_code_orig = state_code) %>%
+  left_join(state_mapping, by = c("State_Name_dest" = "state_name")) %>%
+  rename(state_code_dest = state_code)
+
+FGP_panel <- FGP_panel %>%
+  mutate(pair_key = paste(pmin(state_code_orig, state_code_dest), 
+                         pmax(state_code_orig, state_code_dest)))
+
+border_pairs <- neighbors_states %>%
+  filter(!(StateCode == "AK" & NeighborStateCode == "WA") &
+         !(StateCode == "WA" & NeighborStateCode == "AK")) %>% 
+  mutate(pair_key = paste(pmin(StateCode, NeighborStateCode), 
+                         pmax(StateCode, NeighborStateCode))) %>%
+  select(pair_key) %>%
+  distinct()
+
+FGP_panel <- FGP_panel %>%
+  mutate(contig_state = as.integer(pair_key %in% border_pairs$pair_key)) %>%
+  select(-state_code_orig, -state_code_dest)
+
+FGP_panel_new <- FGP_panel_new %>%
+  left_join(state_mapping, by = c("State_Name_orig" = "state_name")) %>%
+  rename(state_code_orig = state_code) %>%
+  left_join(state_mapping, by = c("State_Name_dest" = "state_name")) %>%
+  rename(state_code_dest = state_code)
+
+FGP_panel_new <- FGP_panel_new %>%
+  mutate(pair_key = paste(pmin(state_code_orig, state_code_dest), 
+                         pmax(state_code_orig, state_code_dest)))
+
+FGP_panel_new <- FGP_panel_new %>%
+  mutate(contig_state = as.integer(pair_key %in% border_pairs$pair_key)) %>%
+  select(-state_code_orig, -state_code_dest)
+
+FGP_panel$contig_state <- factor(FGP_panel$contig_state, levels = c(0, 1))
+FGP_panel_new$contig_state <- factor(FGP_panel_new$contig_state, levels = c(0, 1))
+```
+
+## Summary Statistics
+
+```{r}
+library(dplyr)
+library(psych)
+library(stargazer)
+library(skimr)
+library(knitr)
+library(kableExtra)
+library(xtable)
+
+
+desc_stats <- FGP_panel %>%
+  select(geo_distance_km, contig_faf, contig_state, within_state,
+         SoL_orig, SoL_dest, GDP_orig, GDP_dest, value) %>%
+  mutate(across(c(within_state, contig_faf, contig_state), ~as.numeric(as.character(.)))) %>%
+  skim()
+
+desc_stats
+#xtable(desc_stats, digits = 4)
+```
+
+## Data for Trade Distribution Map
+
+```{r}
+# Total export by zones (origin)
+exports <- FGP_panel %>%
+  group_by(dms_orig, year) %>%
+  summarise(export_value = sum(value, na.rm = TRUE), .groups = "drop") %>%
+  rename(zone = dms_orig)
+
+# Total import by zones (destination)
+imports <- FGP_panel %>%
+  group_by(dms_dest, year) %>%
+  summarise(import_value = sum(value, na.rm = TRUE), .groups = "drop") %>%
+  rename(zone = dms_dest)
+
+# Combine and calculate the total trade flow (import + export)
+trade_total_yearly <- full_join(exports, imports, by = c("zone", "year")) %>%
+  mutate(
+    export_value = coalesce(export_value, 0),
+    import_value = coalesce(import_value, 0),
+    total_trade = export_value + import_value
+  )
+
+# Average trade flow by zone
+trade_avg_by_zone <- trade_total_yearly %>%
+  group_by(zone) %>%
+  summarise(
+    avg_total_trade = mean(total_trade, na.rm = TRUE),
+    avg_export = mean(export_value, na.rm = TRUE),
+    avg_import = mean(import_value, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+trade_avg_by_zone_with_names <- trade_avg_by_zone %>%
+  left_join(
+    FGP_panel %>% 
+      select(dms_orig, FAF_Zone_1_orig) %>%
+      distinct(dms_orig, .keep_all = TRUE),
+    by = c("zone" = "dms_orig")
+  )
+
+print(trade_avg_by_zone_with_names %>% select(zone, FAF_Zone_1_orig, avg_total_trade))
+```
+
+
+```{r}
+library(openxlsx)
+write.xlsx(trade_avg_by_zone_with_names,"trade_avg_by_zone_with_names.xlsx")
+```
+
+## Naive (Basic) Interpretable Models
+
+```{r}
+library(fixest)
+
+FGP_panel <- FGP_panel %>%
+  group_by(dms_orig, dms_dest) %>%
+  mutate(pair_id = cur_group_id()) %>%
+  ungroup()
+
+FGP_panel_new <- FGP_panel_new %>%
+  group_by(dms_orig, dms_dest) %>%
+  mutate(pair_id = cur_group_id()) %>%
+  ungroup()
+
+FGP_panel <- FGP_panel %>%
+  group_by(year, sctg2) %>%
+  mutate(ys = cur_group_id()) %>% 
+  ungroup() %>% 
+  group_by(year, sctg2, dms_mode) %>%
+  mutate(ysd = cur_group_id()) %>%
+  ungroup() %>% 
+  group_by(sctg2, dms_mode) %>%
+  mutate(sd = cur_group_id()) %>%
+  ungroup() %>% 
+  group_by(dms_orig, dms_dest, sctg2, dms_mode) %>%
+  mutate(sdpair = cur_group_id()) %>%
+  ungroup()
+
+
+# FGP_panel_new <- FGP_panel_new %>%
+#   group_by(year, sctg2, dms_mode) %>%
+#   mutate(ysd = cur_group_id()) %>%
+#   ungroup()
+
+PPML_base <-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) +  within_state + contig_faf + contig_state, 
+              cluster = ~pair_id, 
+              data = FGP_panel)
+
+PPML_year <-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) + within_state + contig_faf + contig_state|year, 
+              cluster = ~pair_id, 
+              data = FGP_panel)
+
+PPML_ts<-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) + within_state + contig_faf + contig_state|ys, 
+              cluster = ~pair_id, 
+              data = FGP_panel)
+
+PPML_tst<-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) + within_state + contig_faf + contig_state|ysd, 
+              cluster = ~pair_id, 
+              data = FGP_panel)
+
+etable(PPML_base, PPML_year, PPML_ts, PPML_tst)
+```
+
+
+## Ind FEs (+ Pair)
+
+```{r}
+FGP_panel <- FGP_panel %>%
+  group_by(year, dms_orig) %>%
+  mutate(o_ind_time = cur_group_id()) %>%
+  ungroup() %>%
+  group_by(year, dms_dest) %>%
+  mutate(d_ind_time = cur_group_id()) %>%
+  ungroup() %>% 
+  group_by(year, dms_orig, sctg2) %>%
+  mutate(o_ind_time_sec = cur_group_id()) %>%
+  ungroup() %>%
+  group_by(year, dms_dest, sctg2) %>%
+  mutate(d_ind_time_sec = cur_group_id()) %>%
+  ungroup() %>% 
+  group_by(year, dms_orig, sctg2, dms_mode) %>%
+  mutate(o_ind_time_sec_tr = cur_group_id()) %>%
+  ungroup() %>%
+  group_by(year, dms_dest, sctg2, dms_mode) %>%
+  mutate(d_ind_time_sec_tr = cur_group_id()) %>%
+  ungroup() %>% 
+  group_by(dms_orig, dms_dest, year) %>%
+  mutate(pair_id_year = cur_group_id()) %>%
+  ungroup() %>% 
+  group_by(dms_orig, dms_dest, year) %>%
+  mutate(pair_id_year = cur_group_id()) %>%
+  ungroup() %>% 
+  group_by(dms_orig, dms_dest, sctg2, dms_mode, year) %>%
+  mutate(pair_id_ysd = cur_group_id()) %>%
+  ungroup()
+
+
+PPML_fix_ind_time<-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) + log(remoteness_exp) + log(remoteness_imp) + within_state + contig_faf + contig_state|o_ind_time + d_ind_time,
+              cluster = ~pair_id,
+              data = FGP_panel)
+
+PPML_fix_ind_time_sec<-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) + log(remoteness_exp) + log(remoteness_imp) + within_state + contig_faf + contig_state|o_ind_time_sec + d_ind_time_sec,
+              cluster = ~pair_id,
+              data = FGP_panel)
+
+PPML_fix_ind_time_sec_tr<-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) + log(remoteness_exp) + log(remoteness_imp) + within_state + contig_faf + contig_state|o_ind_time_sec_tr + d_ind_time_sec_tr, 
+              cluster = ~pair_id, 
+              data = FGP_panel)
+
+PPML_fix_ind_time_pair_ysd <-fepois(value ~ 1 |o_ind_time + d_ind_time + ysd + pair_id, 
+              cluster = ~pair_id, 
+              data = FGP_panel)
+
+PPML_fix_ind_time_sec_pair <-fepois(value ~ 1 |o_ind_time_sec + d_ind_time_sec + pair_id, 
+              cluster = ~pair_id, 
+              data = FGP_panel)
+
+
+PPML_fix_ind_time_sec_tr_pair<-fepois(value ~ 1 |o_ind_time_sec_tr + d_ind_time_sec_tr + pair_id,
+              cluster = ~pair_id,
+              data = FGP_panel)
+
+PPML_fix_ind_time_sec_tr_pair_year<-fepois(value ~ 1 |o_ind_time_sec_tr + d_ind_time_sec_tr + pair_id_year,
+              cluster = ~pair_id,
+              data = FGP_panel)
+
+
+# PPML_fix_ind_time_stp<-fepois(value ~ 1 |o_ind_time + d_ind_time + ysd + pair_id, 
+#               cluster = ~pair_id, 
+#               data = FGP_panel)
+# 
+
+
+etable(PPML_fix_ind_time, PPML_fix_ind_time_sec, PPML_fix_ind_time_sec_tr, PPML_fix_ind_time_sec_tr_pair)
+```
+
+
+## NTL
+
+### Explicit Approach
+
+```{r}
+FGP_panel_new <- FGP_panel_new %>%
+  group_by(year, sctg2, dms_mode) %>%
+  mutate(ysd = cur_group_id()) %>%
+  ungroup()
+
+# FGP_panel <- FGP_panel %>% mutate(SoL_pp_orig = SoL_orig/Num_pixel_orig, SoL_pp_dest = SoL_dest/Num_pixel_dest)
+# FGP_panel_new <- FGP_panel_new %>% mutate(SoL_pp_orig = SoL_orig/Num_pixel_orig, SoL_pp_dest = SoL_dest/Num_pixel_dest)
+# 
+# FGP_panel <- FGP_panel %>% mutate(SoL_pa_orig = SoL_orig/Area_km2_orig, SoL_pa_dest = SoL_dest/Area_km2_dest)
+# FGP_panel_new <- FGP_panel_new %>% mutate(SoL_pa_orig = SoL_orig/Area_km2_orig, SoL_pa_dest = SoL_dest/Area_km2_dest)
+# 
+# FGP_panel <- FGP_panel %>% mutate(SoL_pc_orig = SoL_orig/POP_orig, SoL_pc_dest = SoL_dest/POP_dest)
+# FGP_panel_new <- FGP_panel_new %>% mutate(SoL_pc_orig = SoL_orig/POP_orig, SoL_pc_dest = SoL_dest/POP_dest)
+
+
+PPML_tst_1 <-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) + within_state + contig_faf + contig_state|ysd, 
+              cluster = ~pair_id, 
+              data = FGP_panel %>% filter(year!='2022' & year!='2023'))
+
+PPML_tst_ntl <-fepois(value ~ log(geo_distance_km) + log(SoL_orig) + log(SoL_dest) + within_state + contig_faf + contig_state|ysd, 
+              cluster = ~pair_id, 
+              data = FGP_panel %>% filter(year!='2022' & year!='2023'))
+
+PPML_tst_gdp_ntl <-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) + log(SoL_orig) + log(SoL_dest) + within_state + contig_faf + contig_state|ysd, 
+              cluster = ~pair_id, 
+              data = FGP_panel %>% filter(year!='2022' & year!='2023'))
+
+
+PPML_tst_2 <-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) + within_state + contig_faf + contig_state|ysd, 
+              cluster = ~pair_id, 
+              data = FGP_panel_new %>% filter(year!='2022' & year!='2023'))
+
+PPML_tst_ntl_2 <-fepois(value ~ log(geo_distance_km) + log(SoL_orig) + log(SoL_dest) + within_state + contig_faf + contig_state|ysd, 
+              cluster = ~pair_id, 
+              data = FGP_panel_new %>% filter(year!='2022' & year!='2023'))
+
+PPML_tst_gdp_ntl_2 <-fepois(value ~ log(geo_distance_km) + log(GDP_orig) + log(GDP_dest) + log(SoL_orig) + log(SoL_dest) + within_state + contig_faf + contig_state|ysd, 
+              cluster = ~pair_id, 
+              data = FGP_panel_new %>% filter(year!='2022' & year!='2023'))
+
+
+etable(PPML_tst_1, PPML_tst_ntl, PPML_tst_gdp_ntl, PPML_tst_2, PPML_tst_ntl_2, PPML_tst_gdp_ntl_2)
+```
+
+
+### Advanced Approach
+
+## Full Sample
+
+```{r}
+library(car)
+library(tidyr)
+
+FGP_panel1 <- FGP_panel %>%
+  mutate(
+    o_ind_time_sec_tr = str_c(year, dms_orig, sctg2, dms_mode, sep = "_"),
+    d_ind_time_sec_tr = str_c(year, dms_dest, sctg2, dms_mode, sep = "_"),
+    o_ind_time = str_c(year, dms_orig, sep = "_"),
+    d_ind_time = str_c(year, dms_dest, sep = "_")
+  )
+
+# aggregated flows
+
+data_agg <- FGP_panel1 %>%
+  group_by(dms_orig, o_ind_time, dms_dest, d_ind_time, pair_id, year, GDP_orig, SoL_orig, GDP_dest, SoL_dest, POP_orig, POP_dest, Area_km2_orig, Area_km2_dest) %>%
+  summarise(value = sum(value), .groups = "drop") %>% filter(year!='2022' & year!='2023') %>%
+  mutate(
+    dms_orig_num = as.numeric(as.character(dms_orig)),
+    dms_dest_num = as.numeric(as.character(dms_dest)),
+    sorted_orig = pmin(dms_orig_num, dms_dest_num), 
+    sorted_dest = pmax(dms_orig_num, dms_dest_num)
+  ) %>%
+  group_by(sorted_orig, sorted_dest) %>%
+  mutate(pair_id1 = cur_group_id()) %>%
+  ungroup() %>%
+  select(-dms_orig_num, -dms_dest_num, -sorted_orig, -sorted_dest)
+
+PPML_fix_ind_time_alt5<-fepois(value ~ 1|o_ind_time + d_ind_time + pair_id,
+              cluster = ~pair_id,
+              data = data_agg)
+
+
+# PPML_fix_ind_time_alt3<-fepois(value ~ 1|o_ind_time + d_ind_time + pair_id,
+#               cluster = ~pair_id,
+#               data = FGP_panel1)
+
+
+# PPML_fix_ind_time_alt4<-fepois(value ~ 1|o_ind_time + d_ind_time + ysd + pair_id,
+#               cluster = ~pair_id,
+#               data = FGP_panel2)
+
+# 
+# PPML_fix_ind_time_sec_tr_pair_check<-fepois(value ~ 1 |o_ind_time_sec_tr + d_ind_time_sec_tr + pair_id, 
+#               cluster = ~pair_id, 
+#               data = FGP_panel1)
+
+
+# FEs extraction
+
+fixed_effects <- fixef(PPML_fix_ind_time_alt5)
+
+
+o_fe <- data.frame(o_ind_time = names(fixed_effects$o_ind_time),
+                   o_fe_val = as.numeric(fixed_effects$o_ind_time))
+
+d_fe <- data.frame(d_ind_time = names(fixed_effects$d_ind_time),
+                   d_fe_val = as.numeric(fixed_effects$d_ind_time))
+
+
+FGP_panelfe <- merge(data_agg, o_fe, by = "o_ind_time", all.x = TRUE)
+FGP_panelfe <- merge(FGP_panelfe , d_fe, by = "d_ind_time", all.x = TRUE)
+
+
+# datasets for exporter and importer
+
+origdf <- FGP_panelfe %>%
+  select(o_ind_time, dms_orig, year, GDP_orig, SoL_orig, POP_orig, Area_km2_orig, o_fe_val) %>%
+  distinct(o_ind_time, .keep_all = TRUE) 
+
+destdf <- FGP_panelfe %>%
+  select(d_ind_time, dms_dest, year, GDP_dest, SoL_dest, POP_dest, Area_km2_dest, d_fe_val) %>%
+  distinct(d_ind_time, .keep_all = TRUE)
+
+
+
+OLS_orig <-feols(o_fe_val ~ log(GDP_orig), 
+              data = origdf)
+
+OLS_dest <-feols(d_fe_val ~ log(GDP_dest), 
+              data = destdf)
+
+OLS_origsol <-feols(o_fe_val ~ log(SoL_orig), 
+              data = origdf)
+
+OLS_destsol <-feols(d_fe_val ~ log(SoL_dest), 
+              data = destdf)
+
+OLS_origsolgdp <-feols(o_fe_val ~ log(GDP_orig) + log(SoL_orig), 
+              data = origdf)
+
+OLS_destsolgdp <-feols(d_fe_val ~ log(GDP_dest) + log(SoL_dest), 
+              data = destdf)
+
+etable(OLS_orig, OLS_dest, OLS_origsol, OLS_destsol, OLS_origsolgdp, OLS_destsolgdp)
+```
+
+
+## Subsample
+
+```{r}
+FGP_panel_new1 <- FGP_panel_new %>%
+  mutate(
+    o_ind_time_sec_tr = str_c(year, dms_orig, sctg2, dms_mode, sep = "_"),
+    d_ind_time_sec_tr = str_c(year, dms_dest, sctg2, dms_mode, sep = "_"),
+    o_ind_time = str_c(year, dms_orig, sep = "_"),
+    d_ind_time = str_c(year, dms_dest, sep = "_"),
+  )
+
+FGP_panel_new2 = FGP_panel_new1 %>% filter(year!='2022' & year!='2023')
+
+data_agg_new <- FGP_panel_new1 %>%
+  group_by(dms_orig, o_ind_time, dms_dest, d_ind_time, pair_id, year, GDP_orig, SoL_orig, GDP_dest, SoL_dest) %>%
+  summarise(value = sum(value), .groups = "drop") %>% filter(year!='2022' & year!='2023')
+```
+
+
+```{r}
+fixed_effects1 <- fixef(PPML_fix_ind_time_alt5)
+
+
+o_fe1 <- data.frame(o_ind_time = names(fixed_effects1$o_ind_time),
+                   o_fe_val = as.numeric(fixed_effects1$o_ind_time))
+
+d_fe1 <- data.frame(d_ind_time = names(fixed_effects1$d_ind_time),
+                   d_fe_val = as.numeric(fixed_effects1$d_ind_time))
+
+
+FGP_panelfe1 <- merge(FGP_panel_new2, o_fe1, by = "o_ind_time", all.x = TRUE)
+FGP_panelfe1 <- merge(FGP_panelfe1 , d_fe1, by = "d_ind_time", all.x = TRUE)
+
+origdf1 <- FGP_panelfe1 %>%
+  select(o_ind_time, dms_orig, year, GDP_orig, SoL_orig, o_fe_val) %>%
+  distinct(o_ind_time, .keep_all = TRUE)
+
+destdf1 <- FGP_panelfe1 %>%
+  select(d_ind_time, dms_dest, year, GDP_dest, SoL_dest, d_fe_val) %>%
+  distinct(d_ind_time, .keep_all = TRUE)
+
+OLS_orig1 <-feols(o_fe_val ~ log(GDP_orig), 
+              data = origdf1)
+
+OLS_dest1 <-feols(d_fe_val ~ log(GDP_dest), 
+              data = destdf1)
+
+OLS_origsol1 <-feols(o_fe_val ~ log(SoL_orig), 
+              data = origdf1)
+
+OLS_destsol1 <-feols(d_fe_val ~ log(SoL_dest), 
+              data = destdf1)
+
+OLS_origsolgdp1 <-feols(o_fe_val ~ log(GDP_orig) + log(SoL_orig), 
+              data = origdf1)
+
+OLS_destsolgdp1 <-feols(d_fe_val ~ log(GDP_dest) + log(SoL_dest), 
+              data = destdf1)
+
+etable(OLS_orig1, OLS_dest1, OLS_origsol1, OLS_destsol1, OLS_origsolgdp1, OLS_destsolgdp1)
+```
+
+
+### Trade by Sector and Transport Mode
+
+```{r}
+library(dplyr)
+
+top_10_sectors_avg <- FGP_panel %>%
+  group_by(year, sctg2) %>%
+  summarise(yearly_value = sum(value, na.rm = TRUE)) %>%
+  group_by(sctg2) %>%
+  summarise(avg_value = mean(yearly_value, na.rm = TRUE)) %>%
+  mutate(percentage = 100 * avg_value / sum(avg_value)) %>%
+  arrange(desc(avg_value)) %>%
+  slice_head(n = 10)
+
+print(top_10_sectors_avg)
+
+top_transport_avg <- FGP_panel %>%
+  group_by(year, dms_mode) %>%
+  summarise(yearly_value = sum(value, na.rm = TRUE)) %>%
+  group_by(dms_mode) %>%
+  summarise(avg_value = mean(yearly_value, na.rm = TRUE)) %>%
+  mutate(percentage = 100 * avg_value / sum(avg_value)) %>%
+  arrange(desc(avg_value)) %>%
+  slice_head(n = 10)
+
+print(top_transport_avg)
+```
+
+
+### Average SoL and GDP of Each Zone
+
+```{r}
+GDP_NTL <- FGP_panel %>% select(dms_orig, FAF_Zone_1_orig, year, GDP_orig, SoL_orig) %>% group_by(year) %>% distinct(dms_orig, .keep_all = TRUE) %>% na.omit()
+
+GDP_NTL_avg = GDP_NTL %>% 
+  group_by(dms_orig, FAF_Zone_1_orig) %>%  
+  summarise(
+    mean_GDP = mean(GDP_orig, na.rm = TRUE), 
+    mean_SoL = mean(SoL_orig, na.rm = TRUE),  
+    .groups = 'drop'  
+  ) %>%
+  na.omit()  
+```
+
+
+```{r}
+write.xlsx(GDP_NTL,"GDP_NTL.xlsx")
+```
+
+
